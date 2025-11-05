@@ -1,0 +1,105 @@
+# --- Python / Env ---
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+
+# Virtual envs
+.venv/
+venv/
+
+# Environment files / secrets
+.env
+.env.*
+*.env
+secrets.*
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.history/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Tests / Linters ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.cache/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Project specific ---
+# Generated artifacts (keep folder, ignore contents)
+data/**
+!data/.gitkeep
+
+# Pipeline lock file (safety)
+data/pipeline.lock
+
+# Local config with credentials
+config/app.yaml
+
+# Local overrides (optional)
+config/*.local.yaml
+config/*.override.yaml
+
+# Local helper script (may contain tokens or publish steps)
+run_and_publish.sh
+
+# Optional local env/version managers
+.direnv/
+.envrc
+.python-version
+.tool-versions
+.conda/
+.mamba/
+.micromamba/
+
+# Optional personal cron export
+cron/cron
+
+# Local AI tooling configs (may contain tokens)
+.codex/
+.specify/
+
+# Misc local outputs
+nohup.out
+profile*
+*.log
+# Virtualenvs and Python caches
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Editors/IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Environment and secrets
+.env
+
+# Project data outputs and logs
+data/**
+!data/.gitkeep
+*.log
+
+# Misc
+*.swp
+*.swo

@@ -1,0 +1,19 @@
+# Example crontab for daily report generation (08:00 local time)
+# Load into crontab with: crontab -e
+# Replace WORKDIR with your absolute repo path.
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+WORKDIR=/absolute/path/to/crypto-daily-intelligence-system
+
+# If using a virtualenv, ensure it exists at $WORKDIR/.venv
+# Escape % in crontab date format by doubling (%%)
+0 8 * * * cd "$WORKDIR" && \
+  source .venv/bin/activate && \
+  /usr/bin/env python scripts/run_daily.py >> data/logs/$(date +\%F).cron.log 2>&1
+
+# Alternative (system Python, no virtualenv):
+# 0 8 * * * cd "$WORKDIR" && /usr/bin/env python3 scripts/run_daily.py >> data/logs/$(date +\%F).cron.log 2>&1
+
+# Tip: Monitor the latest run log under data/logs/YYYY-MM-DD.run.log
+#      and ensure no stale data/pipeline.lock before manual reruns.

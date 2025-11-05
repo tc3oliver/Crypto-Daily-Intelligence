@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: Crypto Daily Intelligence Pipeline API
+  version: 1.0.0
+  description: >
+    Internal endpoints for orchestrating the daily crypto intelligence pipeline,
+    triggering stage reruns, and retrieving generated artifacts.
+servers:
+  - url: https://ops.internal.example.com
+    description: Internal operations gateway (restricted access)
+tags:
+  - name: Pipeline
+    description: Orchestration endpoints for the daily job
+  - name: Artifacts
+    description: Access to generated reports and logs
+
+paths:
+  /pipeline/run:
+    post:
+      tags: [Pipeline]
+      summary: Trigger the full daily pipeline
+      operationId: runPipeline
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date:
+                  type: string
+                  format: date
+                  description: >
+                    Target date (YYYY-MM-DD). Defaults to today in Asia/Taipei if omitted.
+                dryRun:
+                  type: boolean
+                  default: false
+                  description: When true, executes validation without persisting artifacts.
+              additionalProperties: false
+      responses:
+        '202':
+          description: Pipeline accepted for execution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId:
+                    type: string
+                    example: "run-2025-11-04-0800"
+                  status:
+                    type: string
+                    enum: [accepted]
+        '409':
+          description: Pipeline already running (`data/pipeline.lock` present)
+        '500':
+          description: Failed to enqueue run
+
+  /pipeline/run-stage:
+    post:
+      tags: [Pipeline]
+      summary: Rerun a single stage for a specific date
+      operationId: runStage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stage, date]
+              properties:
+                stage:
+                  type: string
+                  enum:
+                    - fetch_metrics
+                    - ingest_miniflux
+                    - preprocess
+                    - cluster_today
+                    - deepresearch
+                    - build_report
+                date:
+                  type: string
+                  format: date
+                force:
+                  type: boolean
+                  default: false
+                  description: Overwrite existing artifacts even if present.
+              additionalProperties: false
+      responses:
+        '202':
+          description: Stage rerun accepted
+        '400':
+          description: Missing or invalid parameters
+        '404':
+          description: Required upstream artifacts not found
+
+  /artifacts/reports/{date}:
+    get:
+      tags: [Artifacts]
+      summary: Fetch generated daily report
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Markdown report for the specified date
+          content:
+            text/markdown:
+              schema:
+                type: string
+        '404':
+          description: Report not found
+
+  /artifacts/logs/{date}:
+    get:
+      tags: [Artifacts]
+      summary: Retrieve structured run log for auditing
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Structured log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        stage:
+                          type: string
+                        message:
+                          type: string
+                        status:
+                          type: string
+                          enum: [OK, ERROR, WARN]
+                        durationSeconds:
+                          type: number
+        '404':
+          description: Log not available
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+security:
+  - bearerAuth: []

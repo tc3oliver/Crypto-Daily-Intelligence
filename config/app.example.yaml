@@ -1,0 +1,41 @@
+# Copy to config/app.yaml and fill in values.
+
+miniflux:
+  base_url: "https://YOUR_MINIFLUX_HOST"
+  token: "REPLACE_WITH_MINIFLUX_TOKEN"
+  categories: [22]            # category IDs for crypto sources
+  limit: 300                  # max entries per request
+  window_hours: 24            # look-back window
+  timeout_seconds: 30
+
+litellm:
+  base_url: "http://localhost:9400"
+  api_key: "sk-REPLACE"
+  model_chat: "rag-answer"
+  model_embed: "local-embed"
+  timeout_seconds: 60
+  timeouts:
+    chat: 60       # seconds for streaming chat completions
+    embed: 30      # seconds for embedding requests
+  retries:
+    chat:
+      max_attempts: 3
+      backoff_seconds: 5
+    embed:
+      max_attempts: 2
+      backoff_seconds: 5
+
+output:
+  base_dir: "data"
+  report_dir: "data/reports"
+  report_template: "config/report_prompt.md"
+  timezone: "Asia/Taipei"
+
+runtime:
+  max_topics_per_day: 40
+  max_items_per_topic: 15
+  similarity_threshold: 0.82
+
+# Note:
+# - Do not commit secrets. Use local files or environment overrides.
+# - Ensure LiteLLM and Miniflux endpoints are reachable before scheduling.
