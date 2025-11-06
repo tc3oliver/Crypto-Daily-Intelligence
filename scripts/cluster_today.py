@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 """
-高優先實作：以 LiteLLM embeddings 進行 cosine 分群，並以 chat 生成主題名稱。
+以 LiteLLM embeddings 進行 cosine 分群（不進行 LLM 命名）。
+
+變更說明：
+- 原本在此檔進行的主題命名（呼叫 chat LLM）已移除，改由 deepresearch.py 在進行主題研究時一併產出標題，降低 Token 與請求次數。
 
 TODO:
 - [Batching] 將 embedding 請求分批（目前一次全部，若文本很多可能超參數上限）。
@@ -15,7 +18,6 @@ import json
 import time
 import re
 import html
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -49,19 +51,6 @@ def _prepare_text(item: Dict[str, object]) -> str:
     if text:
         text = text[:500]
     return (title + "\n" + text).strip()
-
-
-def _title_with_chat(headlines: List[str], config: Dict[str, object]) -> str:
-    sample = "\n".join(f"- {h}" for h in headlines[:6])
-    messages = [
-        {"role": "system", "content": "你是一位加密市場分析師，請用繁體中文生成精煉、可讀性高的主題標題（10-30 字），不要加標點。"},
-        {"role": "user", "content": f"根據以下文章標題，產出一個主題名稱：\n{sample}"},
-    ]
-    title = litellm_chat(messages, config) or ""
-    title = title.strip().splitlines()[0] if title else ""
-    if not title:
-        title = headlines[0] if headlines else "未命名主題"
-    return title
 
 
 def main() -> None:
@@ -205,8 +194,8 @@ def main() -> None:
     clusters = clusters[:max_topics]
 
     topic_dicts: List[Dict[str, object]] = []
-    _log(f"主題命名開始：群數={len(clusters)}，每群最多 {max_items_per_topic} 筆")
-    # 準備每群的 headlines 與 items
+    _log(f"準備輸出主題（不進行 LLM 命名）：群數={len(clusters)}，每群最多 {max_items_per_topic} 筆")
+    # 準備每群的 headlines 與 items（僅作為代表文本使用）
     prepared: List[Dict[str, object]] = []
     for c in clusters:
         indices: List[int] = c["indices"]  # type: ignore[index]
@@ -217,41 +206,6 @@ def main() -> None:
             "items": cluster_items,
             "headlines": headlines,
         })
-
-    # 以執行緒池並行命名，限制最大並行度避免觸發速率限制
-    max_workers = int(config.get("runtime", {}).get("naming_max_workers", 4))
-    # 單條群（或 headline 不足）不呼叫 LLM，直接用第一個標題
-    to_name: List[int] = []
-    titles: Dict[int, str] = {}
-    skipped = 0
-    for i, p in enumerate(prepared):
-        heads = p["headlines"]  # type: ignore[index]
-        indices = p["indices"]  # type: ignore[index]
-        if len(indices) <= 1 or len(heads) <= 1:
-            titles[i] = (heads[0] if heads else "未命名主題")
-            skipped += 1
-        else:
-            to_name.append(i)
-
-    _log(f"主題命名並行化：max_workers={max_workers}，需命名={len(to_name)}，直接使用標題（跳過 LLM）={skipped}")
-    if to_name:
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futures = {ex.submit(_title_with_chat, prepared[i]["headlines"], config): i for i in to_name}
-            done = 0
-            total = len(to_name)
-            for fut in as_completed(futures):
-                i = futures[fut]
-                try:
-                    t = fut.result(timeout=float(config.get("litellm", {}).get("timeouts", {}).get("chat", 60)))
-                except Exception:
-                    t = ""
-                if not t:
-                    heads = prepared[i]["headlines"]  # type: ignore[index]
-                    t = (heads[0] if heads else "未命名主題")
-                titles[i] = t
-                done += 1
-                if (done % 5) == 0 or done == total:
-                    _log(f"主題命名進度：{done}/{total}")
 
     # snippet 生成工具
     def _mk_snippet(item: Dict[str, object], max_chars: int) -> str:
@@ -274,7 +228,8 @@ def main() -> None:
         indices: List[int] = prepared[i]["indices"]  # type: ignore[index]
         cluster_items = prepared[i]["items"]  # type: ignore[index]
         headlines = prepared[i]["headlines"]  # type: ignore[index]
-        title = titles.get(i, (headlines[0] if headlines else "未命名主題"))
+        # 不在此處命名，提供簡易代表文本與 placeholder 標題（由 deepresearch 重新命名）
+        title = None  # 交由 deepresearch.py 命名
         rep_text = "；".join(headlines[:2]) if headlines else (cluster_items[0].get("text") if cluster_items else "")
         topic_dicts.append({
             "topic_id": f"topic-{i+1:03d}",

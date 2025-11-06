@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 """
-高優先實作：使用 LiteLLM chat 產生每個主題的結構化研究 JSON。
+高優先實作：使用 LiteLLM chat 產生每個主題的結構化研究 JSON，並一併產生主題名稱（topic_title）。
 
-輸出欄位：summary、market_impact、sentiment(0-10)、watch_symbols(list[str])、recommendation(optional)、source_count
+輸出欄位：topic_title、summary、market_impact、sentiment(0-10)、watch_symbols(list[str])、recommendation(optional)、source_count。
+（相較於舊版：主題命名從 cluster_today.py 移至此處，一次完成，節省 Token 與請求次數。）
 
 TODO:
 - [Schema] 以 Pydantic/JSON Schema 驗證欄位型別並自動修正異常值。
@@ -50,7 +51,7 @@ def _default_row(topic_id: str, title: str, items: Iterable[Dict[str, object]]) 
     sources = [it.get("url") for it in items if isinstance(it, dict) and it.get("url")]
     return {
         "topic_id": topic_id,
-        "topic_title": title,
+        "topic_title": title or "未命名主題",
         "summary": "N/A",
         "market_impact": "N/A",
         "sentiment": 5,
@@ -60,8 +61,7 @@ def _default_row(topic_id: str, title: str, items: Iterable[Dict[str, object]]) 
         "sources": sources[:10],
     }
 
-
-def _prompt_for_topic(title: str, items: List[Dict[str, object]], *, max_items: int, max_snippet: int) -> List[Dict[str, str]]:
+def _prompt_for_topic(given_title: str | None, items: List[Dict[str, object]], *, max_items: int, max_snippet: int) -> List[Dict[str, str]]:
     lines: List[str] = []
     for it in items[:max_items]:
         t = (it.get("title") or "").strip()
@@ -81,10 +81,14 @@ def _prompt_for_topic(title: str, items: List[Dict[str, object]], *, max_items: 
     bullet = "\n".join(lines)
     system = (
         "你是資深加密市場分析師，請用繁體中文輸出 JSON，不要額外文字。"
-        "欄位：summary(2-3 句)、market_impact(高/中/低)、sentiment(0-10 整數)、"
-        "watch_symbols(最多 5 個代號)、recommendation(一句話建議)、source_count(整數)。"
+        "欄位：topic_title(10-30 字，精煉且無標點)、summary(2-3 句)、market_impact(高/中/低)、"
+        "sentiment(0-10 整數)、watch_symbols(最多 5 個代號)、recommendation(一句話建議)、source_count(整數)。"
     )
-    user = f"主題：{title}\n參考資料：\n{bullet}\n請僅輸出 JSON 物件。"
+    title_line = f"既有標籤：{given_title}" if given_title else "無既有標籤，請自行擬定適切的主題名稱。"
+    user = (
+        f"{title_line}\n參考資料：\n{bullet}\n"
+        "請僅輸出 JSON 物件，並務必包含 topic_title。"
+    )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -130,16 +134,22 @@ def main() -> None:
 
     def _research_one(i: int, topic: Dict[str, object]) -> Dict[str, object]:
         topic_id = topic.get("topic_id", "topic-unknown")
-        title = topic.get("title", "未命名主題")
+        raw_title = topic.get("title")
+        title = str(raw_title).strip() if raw_title is not None else ""
+        if not title or title in ("未命名主題", "None"):
+            given_title: str | None = None
+        else:
+            given_title = title
         items: Iterable[Dict[str, object]] = topic.get("items", [])  # type: ignore[arg-type]
         items_list: List[Dict[str, object]] = [it for it in items if isinstance(it, dict)]
-        row = _default_row(str(topic_id), str(title), items_list)
+        row = _default_row(str(topic_id), (given_title or "未命名主題"), items_list)
         try:
-            messages = _prompt_for_topic(str(title), items_list, max_items=max_items_per_topic, max_snippet=max_snippet_chars)
+            messages = _prompt_for_topic(given_title, items_list, max_items=max_items_per_topic, max_snippet=max_snippet_chars)
             reply = litellm_chat(messages, config)
             data = _extract_json(reply)
             if data:
                 row.update({
+                    "topic_title": data.get("topic_title", row["topic_title"]) or row["topic_title"],
                     "summary": data.get("summary", row["summary"]),
                     "market_impact": data.get("market_impact", row["market_impact"]),
                     "sentiment": data.get("sentiment", row["sentiment"]),
@@ -154,12 +164,22 @@ def main() -> None:
                     row["sentiment"] = 5
                 if not isinstance(row["watch_symbols"], list):
                     row["watch_symbols"] = []
-            _log(f"主題處理完成：{i+1}/{len(topics)} -> {topic_id}：{str(title)[:28]}")
+            # 清理標題：避免多行或標點
+            try:
+                tt = str(row.get("topic_title") or "").strip()
+                if "\n" in tt:
+                    tt = tt.splitlines()[0].strip()
+                row["topic_title"] = tt
+            except Exception:
+                pass
+            shown = row.get("topic_title") or given_title or "未命名主題"
+            _log(f"主題處理完成：{i+1}/{len(topics)} -> {topic_id}：{str(shown)[:28]}")
         except Exception as e:
-            _log(f"[WARN] 主題處理失敗：{i+1}/{len(topics)} -> {topic_id}：{str(title)[:28]}，錯誤：{type(e).__name__}")
+            shown = given_title or "未命名主題"
+            _log(f"[WARN] 主題處理失敗：{i+1}/{len(topics)} -> {topic_id}：{str(shown)[:28]}，錯誤：{type(e).__name__}")
         return row
 
-    max_workers = int(config.get("runtime", {}).get("research_max_workers", 4))
+    max_workers = int(config.get("runtime", {}).get("research_max_workers", 8))
     _log(f"研究並行化：max_workers={max_workers}")
 
     research_rows_map: Dict[int, Dict[str, object]] = {}
